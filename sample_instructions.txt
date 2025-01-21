@@ -1,0 +1,7 @@
+fig	type	res	norm	mat1	mat2	chr	start	end	cmap	minmax	extra_hlines	extra_vlines
+sample1_hic	hic	100kb	ICE2	1	N/A	N/A	N/A	N/A	Reds	1	N/A	N/A
+sample1-2_hicdiff	hic_diff	100kb	ICE2	1	2	N/A	N/A	N/A	NSMBish	0.25	N/A	N/A
+sample1-2_local_hicdiff	hic_diff	10kb	ICE2	1	2	chrA	100000	300000	NSMBish	0.25	N/A	N/A
+#1234_dist_curve_5kb	dist_curve	5kb	ICE2	1;2;3;4	chrA	N/A	N/A	N/A	NSMBish	N/A	N/A	75000;800000
+1vs2_vs_3vs4_diffdiff	hic_diffdiff	100kb	ICE2	1-2	3-4	N/A	N/A	N/A	NSMBish	0.25	N/A	N/A
+#1vs2_vs_3vs4_scatterdiff	scatter_diff	100kb	ICE2	1-2	3-4	N/A	N/A	N/A	NSMBish	N/A	N/A	N/A
