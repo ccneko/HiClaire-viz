@@ -27,8 +27,11 @@ HiC map drawing script for Noma lab (single script version)
     - Normalization method, to specify which folder to find the normalized data, basically ICE2
 5. **mat1**
     - ID number of sample(s) to draw. Multiple input supported for some plot types
+    - To draw a difference of difference map, specify sample IDs in an "A-B" where A is the target and B is the control. Result map is (A-B) - (C-D) (division and log2diff versions available)
+    - Specify multiple semicolon-separated samples IDs when plotting distant curves with multiple lines
 6. **mat2**
     - ID number of sample(s) to draw. Multiple input supported for some plot types. "N/A" if only one sample is relevant
+    - To draw a difference of difference map, specify sample IDs in an "C-D" where C is the target and D is the control. Result map is (A-B) - (C-D) (division and log2diff versions available)
 7. **chr**
     - Chromosome, or sequence name. "N/A" to draw all available.
 8. **start**
