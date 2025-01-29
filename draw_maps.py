@@ -82,14 +82,21 @@ def load_config():
         help="Path to the Excel sample sheet file"
     )
 
+    parser.add_argument(
+        "--intrachr", 
+        action="store_true", 
+        help="Input data is intrachromosome only"
+    )
+
     # Parse the arguments
     args = parser.parse_args()
 
-    # Print out the arguments (or implement your logic here)
     print("Instructions file:", args.config_path)
     print("Project directory:", args.project_dir)
     print("Sample sheet:", args.sample_sheet)
+    print(["Inter-chromosome", "Intra-chromosome"][args.intrachr])
     return args
+
 
 def get_kb_length(length):
     if not isinstance(length, (str, int)):
@@ -1347,7 +1354,7 @@ if __name__ == '__main__':
     to_draw = read_to_draw(args.config_path)
     plot_multi_fig(
     to_draw, project_dir=args.project_dir, sample_dict=sample_dict, output_project_dir=args.project_dir, 
-    centromeres=False, sum_1=True, svg=False, y_prob=True)
+    centromeres=False, sum_1=True, svg=False, y_prob=True, intrachrom=args.intrachr)
 
 # cd ~/Project/your_project
 # python3 script/2025-01-20_claire_hic_plot_script.py --project_dir `pwd` --sample_sheet db/hic.xlsx out/2025-01-20_hic_figures/sample_instructions.txt
