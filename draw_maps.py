@@ -106,7 +106,7 @@ def get_kb_length(length):
     elif 'bp' in length:
         kb = int(re.search(r'(\d+)bp', length)[1])/1000
     elif 'Mb' in length:
-        kb = int(re.search(r'(\d+)bp', length)[1])/1e6
+        kb = int(re.search(r'(\d+)Mb', length)[1])*1000
     return kb
 
 
