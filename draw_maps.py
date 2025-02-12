@@ -127,8 +127,9 @@ def get_diff_matrix(df1, df2, log2=False, sum_1=True):
 
 def get_matrix_path(project_dir, sample_name, res, norm, extra_dir="", chrom="ALL"):
     if res >= 1:
-        if res==1000:
+        if res%1000 == 0:
             res_unit = 'Mb'
+            res = res%1000
         else:
             res_unit = 'kb'
     else:
