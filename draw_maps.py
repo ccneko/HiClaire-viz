@@ -129,11 +129,11 @@ def get_matrix_path(project_dir, sample_name, res, norm, extra_dir="", chrom="AL
     if res >= 1:
         if res%1000 == 0:
             res_unit = 'Mb'
-            res = res%1000
+            res = res*1000
         else:
             res_unit = 'kb'
     else:
-        res = int(res * 1000)
+        res = res * 1000
         res_unit = 'bp'
     return Path(f'{project_dir}/data/{extra_dir}/{sample_name}/{res}{res_unit}/{norm}/{chrom}.matrix.gz')
 
