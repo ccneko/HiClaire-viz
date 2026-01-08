@@ -1,25 +1,20 @@
 #!/bin/env python3
 import os
 import sys
-from glob import glob
 from pathlib import Path
 import importlib
-import shutil
-import random
 
 import re
 from datetime import datetime
 import logging
-import pickle
 import argparse
 from collections import defaultdict
-# from multiprocessing import Manager, Pool, cpu_count
 
 import polars as pl 
 import pandas as pd
 import numpy as np
 import math
-from scipy.signal import find_peaks#, savgol_filter
+from scipy.signal import find_peaks
 from scipy.interpolate import UnivariateSpline
 from scipy.ndimage import rotate
 from scipy.stats import ttest_ind, spearmanr
@@ -30,17 +25,9 @@ default_mpl_backend = matplotlib.get_backend()
 import matplotlib.pyplot as plt
 import matplotlib.path as mpath
 from matplotlib.patches import PathPatch, Rectangle, Ellipse
-from matplotlib.transforms import ScaledTranslation
-from matplotlib.ticker import NullLocator, MultipleLocator, ScalarFormatter, FixedLocator, FixedFormatter, FuncFormatter
+from matplotlib.ticker import NullLocator, MultipleLocator, FixedLocator, FixedFormatter, FuncFormatter
 from matplotlib import colormaps, colors
 from matplotlib.colors import LinearSegmentedColormap
-
-# import cv2
-# from PIL import Image
-
-# from pptx import Presentation
-# from pptx.util import Inches, Pt
-# from pptx.dml.color import RGBColor
 
 timestamp = lambda: datetime.now().strftime('%Y-%m-%d_%H%M%S')
 datestamp = lambda: datetime.now().strftime('%Y-%m-%d')
@@ -52,8 +39,7 @@ logger.info("Start running.")
 
 logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
 plt.rcParams['svg.fonttype'] = 'none'
-plt.rcParams["font.family"] = "Arial"   # can't install msttcorefonts to show Arial on Talapas, but output is usable
-# plt.rcParams['font.weight'] = 'bold'
+plt.rcParams["font.family"] = "Arial"
 plt.rcParams['agg.path.chunksize'] = 1000
 
 logger.info(f"Matplotlib backend: {default_mpl_backend}")
@@ -141,10 +127,6 @@ def get_kb_length(length):
 def matrix_to_df(matrix_file, sum_1=False):
     df = pd.read_csv(matrix_file, sep='\t', header=0, index_col=0).fillna(0)
     if sum_1:
-        # return df*np.count_nonzero(df)/df.sum().sum()
-        # 2025-11-22: normalize by total sum of contacts instead of non-zero entries
-        # corresponds to `map <- map / sum(map, na.rm=TRUE)`
-        # df = df/df.sum().sum()
         df = df / np.nansum(df)
     return df
 
@@ -345,7 +327,6 @@ def hic_plot(
     for i, chromX in enumerate(chroms):
         for j, chromY in enumerate(chroms):
             working_df = df.filter(regex=f'^{chromX}:', axis=0).filter(regex=f'^{chromY}:', axis=1)
-            # working_df = working_df*np.count_nonzero(working_df)/working_df.sum().sum()
             offset = 0
             if isinstance(ax, np.ndarray):
                 working_ax = ax[i+bool(centromeres), j+bool(centromeres)]
@@ -511,9 +492,7 @@ def hic_plot(
                 telomere_shift = margin_ratio
             else:
                 telomere_shift = -margin_ratio
-            # left_telomere_img = ax[i + 1, 0].imshow(circ_grad, extent = [0, 1, 0.9, 1.1], transform = ax[i + 1, 0].transAxes,
-            #                                         interpolation = 'bicubic', aspect = 'auto', cmap = magma_cmap, 
-            #                                         origin = 'lower', zorder = -2)
+
             left_telomere_polygon = Ellipse(   
                 xy = (0.5, 1 - telomere_shift), width = 0.95, height = 0.03, angle = 0, 
                 edgecolor = magma_edgecolor, facecolor = '#aa1f23', linewidth = linewidth, transform = ax[i + 1, 0].transAxes,
@@ -521,8 +500,6 @@ def hic_plot(
             )
             ax[i + 1, 0].add_patch(left_telomere_polygon)
             left_telomere_polygon.set_clip_on(False)
-            # left_telomere_img.set_clip_box(Bbox.from_extents(0, 0, 1.1, 1.1)) # not working
-            # left_telomere_img.set_clip_path(left_telomere_polygon)
 
             left_telomere_polygon = Ellipse(   
                 xy = (telomere_shift, 0.5), width = 0.95, height = 0.03, angle = 990, 
@@ -602,22 +579,17 @@ def get_dist_df(df, distance_ranges, calc_gradients=False, chroms=False, res=5, 
     dist_scores = defaultdict(list)
     if not chroms:
         chroms = sorted(list(set([x.split(':')[0]for x in df.columns])))
-    # rounded_chrom_lengths = dict(zip(chroms, [int(int(df.filter(regex=f'^{chrom}:').columns[-1].split(':')[-1])+1 - res*1000/2) for chrom in chroms]))
+
     for dist in distance_ranges:
         for chrom in chroms:
             working_df = df.filter(regex=f'^{chrom}:', axis=0).filter(regex=f'^{chrom}:', axis=1)
             working_df.index = [int((int(x.split(':')[-1])+1) - res*1000/2) for x in working_df.index]
             working_df.columns = working_df.index
-            # may need more precision here, 2024 versions custom round to nearest 5.
-            # dist_scores[dist] += [custom_round(working_df.loc[x, x + dist*1000], 1) for x in working_df.index if x + dist*1000 <= working_df.index.max()]
-            # 2025-11-22 update: do not round
             dist_scores[dist] += [working_df.loc[x, x + dist*1000] for x in working_df.index if x + dist*1000 <= working_df.index.max()]
             logger.debug(dist, chrom)
             logger.debug(working_df.index[-1])
             logger.debug(dist_scores[dist][:50])
-        # until 2025/11/22, round to 2 decimal places
-        # dist_scores[dist] = round(np.mean(dist_scores[dist]), 2)
-        # 2025-11-22 update: do not round
+
         dist_scores[dist] = np.mean(dist_scores[dist])
         logger.debug(dist, dist_scores[dist])
     scores_by_dist_df = pd.DataFrame.from_dict(dist_scores, orient='index')
@@ -693,9 +665,6 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
         # distance_ranges = list(range(10, 4000, 10)) # dip at 100 kb
         distance_ranges = log_spaced_ranges(start=10, end=4000, n_points=200, step_multiple=10)
 
-    # use for 2025-11-22 pmc4 paper exfig6
-    # y_max = 500
-
     if not chroms:
         chroms = sorted(list(set([x.split(':')[0]for x in dfs[0].columns])))
         
@@ -731,8 +700,6 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
     ax.set_xlim(10, vbounds[-1])
     y_label = "Contact Probability" if prob else "Contact Score"
     
-
-    
     for i in range(1, len(vbounds)):
         score_by_dist_dfs[0][0] = score_by_dist_dfs[0][0].replace(np.inf, np.nan).replace(-np.inf, np.nan)
         # y_min = min([np.nanmin(x[0]) for x in score_by_dist_dfs] + [-1])
@@ -741,9 +708,7 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
         # comment 2025-11-22 for pmc4 paper exfig6
         y_max = max([np.nanmax(x[0]) for x in score_by_dist_dfs] + [default_ymax, y_min*10])
         ax.add_patch(Rectangle((vbounds[i-1], y_min), vbounds[i] - vbounds[i-1], y_max - y_min, color=rect_colors[i-1]))
-        logger.debug(f'y_max: {y_max}')
-    
-    
+        logger.debug(f'y_max: {y_max}')  
 
     score_by_dist_dfs = [score_by_dist_dfs[-1]] + score_by_dist_dfs[:-1]
     labels = [labels[-1]] + labels[:-1]
@@ -759,12 +724,6 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
         line_x_to_plot = np.array(data.index.values)
         line_y_to_plot = np.array(data[0])
         line_y_to_plot[line_y_to_plot == 0] = 1e-10 # to avoid log(0)
-        # line_y_to_plot = savgol_filter(line_y_to_plot, 20, 5)
-        # if lowess_smooth:
-            # logger.debug(f'line_x_to_plot: {line_x_to_plot}')
-            # logger.debug(f'line_y_to_plot: {line_y_to_plot}')
-            # line_y_to_plot, smoothed_line_y_stderr = lowess(line_x_to_plot, line_y_to_plot, f = 1/5)
-            # logger.debug(f'smoothed_line_y_stderr: {smoothed_line_y_stderr}')
 
         if spline_factor > 0:
             # Drop zero or negative entries (log scale cannot handle them)
@@ -811,11 +770,6 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
         peak_locs, peak_heights = find_peaks(ddy, height=0.005)
         if domain_type:
             for j, peak_loc in enumerate(peak_locs): 
-                # if data.index.values.tolist()[int(peak_loc)] < kink_x_min or data.index.values.tolist()[int(peak_loc)] > kink_x_max:
-                #     continue
-                # # https://qiita.com/shoalna/items/655d95f1d1b41cbf2454
-                # x_to_plot = (x[int(peak_loc)] - np.log10(ax.get_xlim()[0]))/ (np.log10(ax.get_xlim()[1]) - np.log10(ax.get_xlim()[0]))
-                # y_to_plot = (y[int(peak_loc)] - np.log10(y_min)) / (np.log10(y_max) - np.log10(y_min))
 
                 idx = int(peak_loc)           
                 x_bp = line_x_to_plot[idx]
@@ -839,40 +793,7 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
                                     zorder=9999)
                 ax.add_artist(circle)
                 break
-    
 
-
-        # cohesin OK
-        # ddy0_x = list(np.around(ddy, decimals=2)).index(0.01)
-        # x_to_plot = (x[ddy0_x] - np.log10(ax.get_xlim()[0]))/ (np.log10(ax.get_xlim()[1]) - np.log10(ax.get_xlim()[0]))
-        # y_to_plot = (y[ddy0_x] - np.log10(y_min)) / (np.log10(y_max) - np.log10(y_min))
-        # logger.debug(x_to_plot, y_to_plot)
-        # circle_r = 0.01
-        # circle = plt.Circle((x_to_plot, y_to_plot), 
-        #                     circle_r, 
-        #                     transform = ax.transAxes,
-        #                     edgecolor = color, 
-        #                     facecolor = '#ffffffcc', 
-        #                     zorder=9999)
-        # ax.add_artist(circle)
-
-        # ddy0_x = -1
-        # for x_ptr, some_ddy in enumerate(ddy):
-        #     if x[x_ptr] < 300 or x[x_ptr] > 1000:
-        #         continue
-        #     if ddy[x_ptr] == 0.01 and ddy[x_ptr - 1] > ddy[x_ptr] and ddy[x_ptr - 2] >= ddy[x_ptr - 1]:
-        #         ddy0_x = ddy[x_ptr]
-        # x_to_plot = (x[ddy0_x] - np.log10(ax.get_xlim()[0]))/ (np.log10(ax.get_xlim()[1]) - np.log10(ax.get_xlim()[0]))
-        # y_to_plot = (y[ddy0_x] - np.log10(y_min)) / (np.log10(y_max) - np.log10(y_min))
-        # logger.debug(x_to_plot, y_to_plot)
-        # circle_r = 0.01
-        # circle = plt.Circle((x_to_plot, y_to_plot), 
-        #                     circle_r, 
-        #                     transform = ax.transAxes,
-        #                     edgecolor = color, 
-        #                     facecolor = '#ffffffcc', 
-        #                     zorder=9999)
-        # ax.add_artist(circle)
 
     ax.spines[['top', 'right']].set_visible(False)
     ax.spines[['bottom', 'left']].set_linewidth(spinewidth)
@@ -1102,7 +1023,6 @@ def scatter_diff_scores(df1_path, df2_path,
             logger.debug(f'dist_filtered_log2_diff_df.head(): {dist_filtered_log2_diff_df.head()}')
 
             for i in range(int(target_domains[target_domains['chrom'].isin(chroms)].iloc[-1]["domain_id"])+1):
-                # logger.debug(log2_diff_df.filter(items=ivs_by_domain_dict[i], axis=0).filter(items=ivs_by_domain_dict[i], axis=1))
                 working_target_log2_diffs_tmp_df = dist_filtered_log2_diff_df.filter(items=ivs_by_domain_dict[i], axis=0).filter(items=ivs_by_domain_dict[i], axis=1)
                 working_target_avg_scores_tmp_df = dist_filtered_avg_df.filter(items=ivs_by_domain_dict[i], axis=0).filter(items=ivs_by_domain_dict[i], axis=1)
                 working_target_log2_diffs_tmp = working_target_log2_diffs_tmp_df.to_numpy().flatten()
@@ -1168,7 +1088,7 @@ def scatter_diff_scores(df1_path, df2_path,
         for bootstrap_counter in range(1000):
             logger.debug(f"len(target_log2_diffs): {len(target_log2_diffs)}")
             logger.debug(f"len(ctrl_target_log2_diffs): {len(ctrl_target_log2_diffs)}")
-            # lambda stat_test = ttest_ind if len(target_log2_diffs) > 20 and len(ctrl_target_log2_diffs) > 20 else mannwhitneyu
+
             logger.info(f"stat_test: {stat_test}")
             if stat_test == "ttest_ind":
                 pvals.append(ttest_ind(np.random.choice(target_log2_diffs, sample_size, replace=False), 
@@ -1300,10 +1220,6 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
         chroms = inline_chroms
         res = get_kb_length(row['res'])
         sum_1 = True if 'sum_1' in row and row['sum_1'] in [1, 'True'] else False
-        density_rescaling = True if 'density_rescaling' in row and row['density_rescaling'] in [1, 'True'] else False
-        if density_rescaling:
-            sum_1 = True
-            y_label = 'Contact Score'
         svg = True if 'svg' in row and row['svg'] in [1, 'True'] else False
         if not chroms:
             if not isinstance(row['chr'], (str, int)):
@@ -1371,7 +1287,7 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
                 vmax = row['minmax']
             if np.isnan(vmax):
                 logger.info(df.columns)
-                # vmax = custom_round(np.max(df), 10**(np.floor(np.log10(np.max(df)))))
+
                 tmp_vmax = np.percentile(df, vmax_percentile)
                 while tmp_vmax == 0 and vmax_percentile < 100:
                     vmax_percentile = min(100, vmax_percentile + 5)
@@ -1419,7 +1335,7 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
                     )
         elif row['type'] == 'dist_curve':
             if row['extra_vlines'] is not None:
-                vbounds = [75, 800] # [75, 800] # cohesin and condensin domain sizes in fission yeast
+                vbounds = [75, 800] # cohesin and condensin domain sizes in fission yeast
             else:
                 vbounds = [int(x) for x in row['extra_vlines'].split(',')]
             dfs = []
@@ -1521,36 +1437,6 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
     return to_draw
 
 matplotlib.use("Agg")
-
-# project_root = '/mnt/talapas/Project' # Please edit as appropriate
-# project_dir = f'{project_root}/your_project'
-
-## os.chdir(f'{project_dir}/script/')
-    
-# dfs = {}
-# sample_df = pl.read_excel(f'{project_dir}/db/hic.xlsx', engine='openpyxl')[['id', 'name']]
-# sample_df.columns = ['sample_id', 'sample_name']
-# sample_dict = dict(sample_df.iter_rows())
-
-
-# res = "100kb"
-# norm = "ICE2"
-# cmap = "turbo" # or "Reds" for one direction, "NSMBish" for diverging values (both +ve and -ve) such as HiC difference map
-# vmax = 1
-# test_samples = ["sample1", "sample2"]
-# for sample in test_samples:
-#     logger.info(sample)
-#     matrix_filepath = f"{project_dir}/data/{sample}/{res}/{norm}/ALL.matrix.gz"
-#     df = matrix_to_df(matrix_filepath, sum_1=True) # sum_1 performs normalization within the whole provided df
-#     out_dir = f"{project_dir}/out/{datestamp()}_hic_figures/{sample}/"
-#     os.makedirs(out_dir, exist_ok=True)
-#     hic_plot(df, cmap=cmap, vmin=0, vmax=1, output_path=f"{out_dir}/{sample}_{res}_{norm}_{cmap}_{vmax}.png")
-#     plt.close()
-
-# to_draw = read_to_draw(f"sample_instructions.txt")
-# plot_multi_fig(
-#     to_draw, project_dir=project_dir, sample_dict=sample_dict, output_project_dir=project_dir, 
-#     centromeres=False, sum_1=True, svg=False)
 
 
 if __name__ == '__main__':
