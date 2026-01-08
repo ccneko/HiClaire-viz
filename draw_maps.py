@@ -83,6 +83,12 @@ def load_config():
     )
 
     parser.add_argument(
+        "--intrachr", 
+        action="store_true", 
+        help="Input data is intrachromosome only"
+    )
+
+    parser.add_argument(
         "--contact_probability", 
         action='store_true',
         help="Use contact probability instead of Hi-C matrix score for plotting"
@@ -119,6 +125,7 @@ def load_config():
     logger.info(f"Sample sheet: {args.sample_sheet}")
     return args
 
+
 def get_kb_length(length):
     if not isinstance(length, (str, int)):
         kb = False
@@ -126,6 +133,8 @@ def get_kb_length(length):
         kb = int(re.search(r'(\d+)kb', length)[1])
     elif 'bp' in length:
         kb = int(re.search(r'(\d+)bp', length)[1])/1000
+    elif 'Mb' in length:
+        kb = int(re.search(r'(\d+)Mb', length)[1])*1000
     return kb
 
 
@@ -149,9 +158,13 @@ def get_diff_matrix(df1, df2, log2=False):
 
 def get_matrix_path(project_dir, sample_name, res, norm, extra_dir="", chrom="ALL"):
     if res >= 1:
-        res_unit = 'kb'
+        if res%1000 == 0:
+            res_unit = 'Mb'
+            res = int(res/1000)
+        else:
+            res_unit = 'kb'
     else:
-        res = int(res * 1000)
+        res = res * 1000
         res_unit = 'bp'
     return Path(f'{project_dir}/data/{extra_dir}/{sample_name}/{res}{res_unit}/{norm}/{chrom}.matrix.gz')
 
