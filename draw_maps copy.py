@@ -3,7 +3,6 @@ import os
 import sys
 from glob import glob
 from pathlib import Path
-import importlib
 import shutil
 import random
 
@@ -22,7 +21,7 @@ import math
 from scipy.signal import find_peaks#, savgol_filter
 from scipy.interpolate import UnivariateSpline
 from scipy.ndimage import rotate
-from scipy.stats import ttest_ind, spearmanr
+from scipy.stats import ttest_ind
 from intervaltree import IntervalTree
 
 import matplotlib
@@ -85,13 +84,7 @@ def load_config():
     parser.add_argument(
         "--contact_probability", 
         action='store_true',
-        help="Use contact probability instead of Hi-C matrix score for plotting"
-    )
-
-    parser.add_argument(
-        "--sum_1",
-        action='store_true',
-        help="Normalize the matrix so that the sum of all entries equals 1 for plotting"
+        help="Output in SVG instead of PNG"
     )
 
     parser.add_argument(
@@ -103,7 +96,7 @@ def load_config():
     parser.add_argument(
         "--svg", 
         action='store_true',
-        help="Output in SVG instead of PNG"
+        help="Use contact probability instead of Hi-C matrix score for plotting"
     )
 
     parser.add_argument(
@@ -130,17 +123,14 @@ def get_kb_length(length):
 
 
 def matrix_to_df(matrix_file, sum_1=False):
-    df = pd.read_csv(matrix_file, sep='\t', header=0, index_col=0).fillna(0)
+    df = pd.read_csv(matrix_file, sep='\t', index_col=0).fillna(0)
     if sum_1:
-        # return df*np.count_nonzero(df)/df.sum().sum()
-        # 2025-11-22: normalize by total sum of contacts instead of non-zero entries
-        # corresponds to `map <- map / sum(map, na.rm=TRUE)`
-        # df = df/df.sum().sum()
-        df = df / np.nansum(df)
-    return df
+        return df*np.count_nonzero(df)/df.sum().sum()
+    else:
+        return df
 
 
-def get_diff_matrix(df1, df2, log2=False):
+def get_diff_matrix(df1, df2, log2=False, sum_1=True):
     if log2:
         return np.log2(df1/df2)
     else:
@@ -184,9 +174,9 @@ def set_output_path(project_dir, row, extension='png'):
                     [   row['fig'], row['mat1'], mat2, row['norm'], row['res'], 
                         row['minmax'], row['cmap'], chrom, start, end]
                 )))
-    output_path = f'{project_dir}/out/{datestamp()}_hic_figures/{row["subfolder"]}'
+    output_path = f'{project_dir}/out/{datestamp()}_hic_figures'
     if not os.path.exists(output_path):
-        os.makedirs(output_path, exist_ok=True)
+        os.mkdir(output_path)
     return f"{output_path}/{name_chain}.{extension}"
 
 
@@ -585,7 +575,11 @@ def hic_plot(
     plt.close()
     return ax
 
-def get_dist_df(df, distance_ranges, calc_gradients=False, chroms=False, res=5, verbose=False):
+def get_dist_df(df, distance_ranges=False, calc_gradients=False, chroms=False, res=5, verbose=False):
+    if not distance_ranges:
+        # distance_ranges = list(range(10, 100, 10)) + list(range(100, 1000, 50)) + list(range(1000, 5600, 100))
+        distance_ranges = list(range(10, 4000, 10))
+
     dist_scores = defaultdict(list)
     if not chroms:
         chroms = sorted(list(set([x.split(':')[0]for x in df.columns])))
@@ -596,16 +590,12 @@ def get_dist_df(df, distance_ranges, calc_gradients=False, chroms=False, res=5, 
             working_df.index = [int((int(x.split(':')[-1])+1) - res*1000/2) for x in working_df.index]
             working_df.columns = working_df.index
             # may need more precision here, 2024 versions custom round to nearest 5.
-            # dist_scores[dist] += [custom_round(working_df.loc[x, x + dist*1000], 1) for x in working_df.index if x + dist*1000 <= working_df.index.max()]
-            # 2025-11-22 update: do not round
-            dist_scores[dist] += [working_df.loc[x, x + dist*1000] for x in working_df.index if x + dist*1000 <= working_df.index.max()]
+            dist_scores[dist] += [custom_round(working_df.loc[x, x + dist*1000], 1) for x in working_df.index if x + dist*1000 <= working_df.index.max()]
             logger.debug(dist, chrom)
             logger.debug(working_df.index[-1])
             logger.debug(dist_scores[dist][:50])
         # until 2025/11/22, round to 2 decimal places
-        # dist_scores[dist] = round(np.mean(dist_scores[dist]), 2)
-        # 2025-11-22 update: do not round
-        dist_scores[dist] = np.mean(dist_scores[dist])
+        dist_scores[dist] = round(np.mean(dist_scores[dist]), 2)
         logger.debug(dist, dist_scores[dist])
     scores_by_dist_df = pd.DataFrame.from_dict(dist_scores, orient='index')
     if calc_gradients:
@@ -636,7 +626,7 @@ def log_spaced_ranges(start=10, end=4000, n_points=200, step_multiple=5):
 
 ## Tanizawa, et al., 2017 Fig 4b-ish
 def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, res=5,
-                        sum_1=True, prob=False, spline_factor=0, #lowess_smooth=False,
+                        sum_1=False, spline=True, #lowess_smooth=False,
                         domain_type = 'condensin',
                         vbounds=[75, 800], rect_colors=['#bce2e8', '#eebbcb', '#c8c2c6'], 
                         vmin=False, vmax=False, colors=['red', 'gray'], 
@@ -646,9 +636,7 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
                         minorticklabelsize=False, minorticklength=False,
                         fontweight='bold',
                         legend_fontsize=False, legend_loc=False, legend_bbox_to_anchor=False,
-                        output_path='output.png', subfolder='',
-                        svg=True, output_array=False
-                    ):
+                        output_path='output.png', svg=True, output_array=False):
     if not linewidth:
         linewidth = 4
     font_size = 12
@@ -669,8 +657,6 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
     if not legend_bbox_to_anchor:
         legend_bbox_to_anchor = (0,0)
 
-    # score_type = ['Score', 'Score (Sum to 1)', 'Probability']
-
     if not distance_ranges:
         # distance_ranges = list(range(10, 100, 10)) + list(range(100, 1000, 50)) + list(range(1000, 4000, 250))
         # distance_ranges = list(range(10, 1000, 10)) + list(range(1000, 4000, 100))
@@ -685,26 +671,21 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
 
     if not chroms:
         chroms = sorted(list(set([x.split(':')[0]for x in dfs[0].columns])))
-        
+
     score_by_dist_dfs = []
     for i, df in enumerate(dfs):
-        if prob:
-            pickle_name = f'out/{datestamp()}_hic_figures/{subfolder}/{labels[i]}_{res}kb_dist_df_prob.pickle'
-        elif sum_1:
-            pickle_name = f'out/{datestamp()}_hic_figures/{subfolder}/{labels[i]}_{res}kb_dist_df_sum1.pickle'
-            default_ymax = 1e-4
-            default_ymin = 1e-8
+        if sum_1:
+            pickle_name = f'out/{datestamp()}_hic_figures/{labels[i]}_dist_df_prob.pickle'
         else:
-            pickle_name = f'out/{datestamp()}_hic_figures/{subfolder}/{labels[i]}_{res}kb_dist_df.pickle'
-            default_ymax = 100
-            default_ymin = 0.0001
+            pickle_name = f'out/{datestamp()}_hic_figures/{labels[i]}_dist_df.pickle'
         if not os.path.isfile(pickle_name):
             dist_df = get_dist_df(df, distance_ranges, chroms=chroms, res=res)
             dist_df.to_pickle(pickle_name)
         else:
             logger.info(f'Reading data from pickle {pickle_name}')
             dist_df = pd.read_pickle(pickle_name)
-
+        if sum_1:
+            dist_df[0] = dist_df / dist_df[0].sum()
         score_by_dist_dfs.append(dist_df)
         del dist_df
 
@@ -716,14 +697,18 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
         vbounds = [10] + vbounds
     vbounds.append(score_by_dist_dfs[0].index.max())
     ax.set_xlim(10, vbounds[-1])
-    y_label = "Contact Probability" if prob else "Contact Score"
-    
-
+    if sum_1:
+        y_label = "Contact Probability"
+        default_ymax = 1
+    else:
+        y_label = "Contact Score"
+        default_ymax = 100
     
     for i in range(1, len(vbounds)):
-        score_by_dist_dfs[0][0] = score_by_dist_dfs[0][0].replace(np.inf, np.nan).replace(-np.inf, np.nan)
+        score_by_dist_dfs[0][0].replace(np.inf, np.nan, inplace=True)
+        score_by_dist_dfs[0][0].replace(-np.inf, np.nan, inplace=True)
         # y_min = min([np.nanmin(x[0]) for x in score_by_dist_dfs] + [-1])
-        y_min = max(min([np.nanmin(x[0]) for x in score_by_dist_dfs] + [0.02]), default_ymin, vmin)
+        y_min = max(min([np.nanmin(x[0]) for x in score_by_dist_dfs] + [0.02]), 0.0001, vmin)
         logger.debug(f'y_min: {y_min}')
         # comment 2025-11-22 for pmc4 paper exfig6
         y_max = max([np.nanmax(x[0]) for x in score_by_dist_dfs] + [default_ymax, y_min*10])
@@ -753,7 +738,7 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
             # line_y_to_plot, smoothed_line_y_stderr = lowess(line_x_to_plot, line_y_to_plot, f = 1/5)
             # logger.debug(f'smoothed_line_y_stderr: {smoothed_line_y_stderr}')
 
-        if spline_factor > 0:
+        if spline:
             # Drop zero or negative entries (log scale cannot handle them)
             mask = (line_x_to_plot > 0) & (line_y_to_plot > 0)
             line_x_to_plot = line_x_to_plot[mask]
@@ -789,6 +774,7 @@ def plot_dist_curves(   dfs, labels=False, distance_ranges=False, chroms=False, 
         ddy = np.gradient(dy)
         
         if domain_type == 'condensin':
+            
             kink_x_min = 200
             kink_x_max = 1000
         elif domain_type == 'cohesin':
@@ -910,7 +896,7 @@ def plot_dist_compare_curve(   df1, df2, distance_ranges, method="log2diff", sum
     if method not in ['log2diff', 'diff', 'ratio']:
         logger.error(f"Method {method} not recognized. Please use 'log2diff', 'diff', or 'ratio'.")
         return
-    score_type = ['Score', 'Score (Sum to 1)'][sum_1]
+    score_type = ['Score', 'Probability'][sum_1]
     if method == 'log2diff':
         dist_comp_df = (get_dist_df(df2, distance_ranges, chroms=chroms, verbose=verbose) / get_dist_df(df1, distance_ranges, chroms=chroms)).apply(np.log2)
         y_label = f'Contact {score_type} Log2 ratio'
@@ -982,7 +968,7 @@ def scatter_diff_scores(df1_path, df2_path,
                         df1_id=False, df2_id=False,
                         ctrl1_id=False, ctrl2_id=False,
                         res=10, min_dist=False, max_dist=False,
-                        chroms=False, domain_type='condensin',
+                        chroms=False,
                         target_bed_path=False, dotsize=1,
                         figsize=(10,10), vmin=False, vmax=False,
                         basic_color='#66666688', highlight_color='#B82B6488',
@@ -1013,21 +999,7 @@ def scatter_diff_scores(df1_path, df2_path,
     if not legend_bbox_to_anchor:
         legend_bbox_to_anchor = (0,0)
 
-    if domain_type == 'condensin':
-        if not target_bed_path:
-            target_bed_path = importlib.resources.files('hiclaire-viz').joinpath('data/codensin_domain_definition.bed')
-        if not min_dist:
-            min_dist = 75
-        if not max_dist:
-            max_dist = 800
-    elif domain_type == 'cohesin':
-        if not target_bed_path:
-            target_bed_path = importlib.resources.files('hiclaire-viz').joinpath('data/cohesin_domain_definition.bed')
-        if not min_dist:
-            min_dist = 10
-        if not max_dist:
-            max_dist = 75
-    elif not target_bed_path:
+    if not target_bed_path:
         logger.error("Please provide a BED file to specify the domain regions.")
         return
     target_domains = pd.read_csv(target_bed_path, sep='\t')
@@ -1039,7 +1011,7 @@ def scatter_diff_scores(df1_path, df2_path,
     for chrom in target_domains['chrom'].unique():
         ivtrees[chrom] = IntervalTree()
     target_domains.apply(lambda x: ivtrees[x['chrom']].addi(x['start'], x['end'], x['domain_id']), axis=1)
-
+ 
     for chrom in target_domains['chrom'].unique():
         final_start = target_domains[target_domains['chrom']==chrom].iloc[-1]['start']
         for i in range(0, final_start + res*1000, res*1000):
@@ -1156,14 +1128,9 @@ def scatter_diff_scores(df1_path, df2_path,
             logger.debug(f"len(target_log2_diffs): {len(target_log2_diffs)}")
             logger.debug(f"len(ctrl_target_log2_diffs): {len(ctrl_target_log2_diffs)}")
             # lambda stat_test = ttest_ind if len(target_log2_diffs) > 20 and len(ctrl_target_log2_diffs) > 20 else mannwhitneyu
-            logger.info(f"stat_test: {stat_test}")
-            if stat_test == "ttest_ind":
-                pvals.append(ttest_ind(np.random.choice(target_log2_diffs, sample_size, replace=False), 
-                                        np.random.choice(ctrl_target_log2_diffs, sample_size, replace=False), 
-                                        equal_var=equal_var).pvalue)
-            elif stat_test == "spearmanr":
-                pvals.append(spearmanr(np.random.choice(target_log2_diffs, sample_size, replace=False),
-                                        np.random.choice(ctrl_target_log2_diffs, sample_size, replace=False)).pvalue)
+            pvals.append(ttest_ind(np.random.choice(target_log2_diffs, sample_size, replace=False), 
+                                   np.random.choice(ctrl_target_log2_diffs, sample_size, replace=False), 
+                                   equal_var=equal_var).pvalue)
         final_pval = np.median(pvals)
         with open(f'{output_path.rsplit(".", 1)[0]}_pvals.txt', 'w') as f:
             f.write('\n'.join([str(x) for x in pvals]))
@@ -1276,7 +1243,7 @@ def get_dist_filtered_df(df, min_dist=False, max_dist=False):
 
 def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=True, triangle=False,
                     distance_ranges=False, chroms=False, domain_type=False, extra_dir="",
-                    sum_1=False, density_rescaling=False, log_score=False, vmin=False, vmax=False, vmax_percentile=80,
+                    sum_1=False, log_score=False, vmin=False, vmax=False, vmax_percentile=80,
                     figsize=(10,10), gridspec=0.05, legend_loc=False, legend_bbox_to_anchor=False, 
                     svg=False, output_array=False, output_project_dir=None, intrachrom=False,
                     output_pval=True, dotsize=1, basic_color='#66666688', highlight_color='#B82B6488',
@@ -1287,10 +1254,6 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
         chroms = inline_chroms
         res = get_kb_length(row['res'])
         sum_1 = True if 'sum_1' in row and row['sum_1'] in [1, 'True'] else False
-        density_rescaling = True if 'density_rescaling' in row and row['density_rescaling'] in [1, 'True'] else False
-        if density_rescaling:
-            sum_1 = True
-            y_label = 'Contact Score'
         svg = True if 'svg' in row and row['svg'] in [1, 'True'] else False
         if not chroms:
             if not isinstance(row['chr'], (str, int)):
@@ -1307,9 +1270,6 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
         else:
             extension = 'png'
         
-        domain_type = row['domain_type'] if 'domain_type' in row else domain_type
-        stat_test = row['stat_test'] if 'stat_test' in row else 'ttest_ind'
-
         if 'hic' in row['type']:
             try:
                 if 'triangle' in row['type']:
@@ -1333,16 +1293,16 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
                         matB_path = get_matrix_path(project_dir, sample_dict[matB], res, row['norm'], extra_dir, chrom_matrix)
                         dfA = matrix_to_df(matA_path, sum_1=sum_1)
                         dfB = matrix_to_df(matB_path, sum_1=sum_1)
-                        df1 = get_diff_matrix(dfA, dfB)
+                        df1 = get_diff_matrix(dfA, dfB, sum_1=sum_1)
                         df1 = df1.reindex(sorted(df1.columns, key=natural_sort_matrix_key), axis=0).reindex(sorted(df1.columns, key=natural_sort_matrix_key), axis=1)
                         matC, matD = [int(x) for x  in row['mat2'].split('-')]
                         matC_path = get_matrix_path(project_dir, sample_dict[matC], res, row['norm'], extra_dir, chrom_matrix)
                         matD_path = get_matrix_path(project_dir, sample_dict[matD], res, row['norm'], extra_dir, chrom_matrix)
                         dfC = matrix_to_df(matC_path, sum_1=sum_1)
                         dfD = matrix_to_df(matD_path, sum_1=sum_1)
-                        df2 = get_diff_matrix(dfC, dfD)
+                        df2 = get_diff_matrix(dfC, dfD, sum_1=sum_1)
                         df2 = df2.reindex(sorted(df2.columns, key=natural_sort_matrix_key), axis=0).reindex(sorted(df2.columns, key=natural_sort_matrix_key), axis=1)
-                    df = get_diff_matrix(df1, df2)
+                    df = get_diff_matrix(df1, df2, sum_1=sum_1)
             except FileNotFoundError as e:
                 logger.warning(f"File not found for sample {row['mat1']} {sample_dict[int(row['mat1'])]} with {row['norm']} normalization at res {res}kb. Skipped.")
                 logger.warning(f"In {project_dir}")
@@ -1411,7 +1371,6 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
                 vbounds = [int(x) for x in row['extra_vlines'].split(',')]
             dfs = []
             samples_to_draw = []
-            spline_factor = row['spline_factor'] if 'spline_factor' in row and row['spline_factor'] is not None else 0
             if isinstance(row['mat1'], int):
                 samples_to_draw.append(row['mat1'])
                 dfs.append(matrix_to_df(get_matrix_path(project_dir, sample_dict[int(row['mat1'])], res, row['norm']), sum_1=sum_1))
@@ -1423,14 +1382,12 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
                     dfs = dfs,
                     res = res,
                     domain_type = domain_type,
-                    subfolder=row['subfolder'] if 'subfolder' in row and row['subfolder'] is not None else "",
                     output_path=set_output_path(output_project_dir, row, extension='svg'),
                     chroms = chroms,
                     labels = samples_to_draw,
                     vbounds = vbounds,
                     output_array = output_array,
                     sum_1 = sum_1,
-                    spline_factor = spline_factor,
                     vmin= row['minmax'],
                 )
             else:
@@ -1438,9 +1395,7 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
                 samples_to_draw = [int(x) for x in row['mat1'].split(';')]
                 samples_to_draw = samples_to_draw[1:] + [samples_to_draw[0]]
                 dfs = [matrix_to_df(get_matrix_path(project_dir, sample_dict[x], res, row['norm']), sum_1=sum_1) for x in samples_to_draw]
-                logger.info(f"len(df.columns) before density rescaling: {[len(df.columns) for df in dfs]}")
-                if density_rescaling:
-                    dfs = [df * len(df.columns) * len(df.columns) for df in dfs]
+
                 if len(dfs) > 1:
                     if len(dfs) > 2:
                         colors = categorical_palettes['nature_cat'][:len(dfs)-1] + ['gray']
@@ -1450,7 +1405,6 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
                         dfs = dfs, 
                         res = res,
                         domain_type = domain_type,
-                        subfolder=row['subfolder'] if 'subfolder' in row and row['subfolder'] is not None else "",
                         output_path=set_output_path(output_project_dir, row, extension='svg'),
                         chroms = chroms,
                         labels = samples_to_draw,
@@ -1497,9 +1451,9 @@ def plot_multi_fig( to_draw, project_dir=None, sample_dict=None, centromeres=Tru
                                 df1_id=df1_id, df2_id=df2_id, ctrl1_id=ctrl1_id, ctrl2_id=ctrl2_id,
                                 min_dist=min_dist, max_dist=max_dist,
                                 target_bed_path=target_bed_path,
-                                chroms=chroms, domain_type=domain_type,
+                                chroms=chroms,
                                 res=res, vmin=vmin, vmax=vmax,
-                                output_pval = output_pval, stat_test=stat_test,
+                                output_pval = output_pval,
                                 dotsize=dotsize, basic_color=basic_color, highlight_color=highlight_color, 
                                 figsize=figsize, 
                                 output_path=set_output_path(output_project_dir, row, extension=extension)
@@ -1547,7 +1501,7 @@ if __name__ == '__main__':
     sample_df.columns = ['sample_id', 'sample_name']
     sample_dict = dict(sample_df.iter_rows())
     to_draw = read_to_draw(args.config_path)
-    sum_1 = args.sum_1
+    sum_1 = args.contact_probability
     domain_type = args.domain_type
     svg = args.svg
     target_bed_path = args.target_bed_path
